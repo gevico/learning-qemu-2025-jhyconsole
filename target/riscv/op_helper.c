@@ -90,6 +90,22 @@ void helper_crush(CPURISCVState *env, uintptr_t src,
         cpu_stl_data(env, dst_p, val);
     }
 }
+void helper_expand(CPURISCVState *env, uintptr_t src,
+                  uintptr_t num, uintptr_t dst)
+{
+    /* 将src的数组一个单元的八位，拆分为dst的数组两个单元的低四位.低四位在dst前，高四位在后 */
+
+    int i;
+    uint8_t val;
+    uintptr_t src_p, dst_p;
+    for (i = 0; i < num; i ++ ) {
+        src_p = src + i * sizeof(uint8_t);
+        dst_p = dst + i * 2 * sizeof(uint8_t);
+        val = cpu_ldl_data(env, src_p);
+        cpu_stl_data(env, dst_p, val & 0x0F);
+        cpu_stl_data(env, dst_p + sizeof(uint8_t), (val >> 4) & 0x0F);
+    }
+}
 
 
 /* Exceptions processing helpers */

@@ -46,6 +46,15 @@ static bool trans_crush(DisasContext *ctx, arg_crush *a)
     gen_helper_crush(tcg_env, src, num, dst);
     return true;
 }
+static bool trans_expand(DisasContext *ctx, arg_expand *a)
+{
+    TCGv src = get_gpr(ctx, a->rs1, EXT_NONE);
+    TCGv num = get_gpr(ctx, a->rs2, EXT_NONE);
+    TCGv dst = get_gpr(ctx, a->rd, EXT_NONE);
+
+    gen_helper_expand(tcg_env, src, num, dst);
+    return true;
+}
 
 
 static bool trans_illegal(DisasContext *ctx, arg_empty *a)
