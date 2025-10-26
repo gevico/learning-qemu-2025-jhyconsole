@@ -27,6 +27,30 @@
 #include "exec/helper-proto.h"
 #include "exec/tlb-flags.h"
 #include "trace.h"
+/* Learning QEMU */
+void helper_dma(CPURISCVState *env, uintptr_t dst,
+                uintptr_t src, target_ulong grain)
+{
+    int n;
+    int i, j;
+    float val;
+    uintptr_t src_p, dst_p;
+
+    if (grain > 2) {
+        riscv_raise_exception(env, RISCV_EXCP_ILLEGAL_INST, GETPC());
+    }
+
+    n = 1 << (grain + 3);
+    for (i = 0; i < n; ++i) {
+        for (j = 0; j < n; ++j) {
+            src_p = src + (i * n + j) * sizeof(float);
+            dst_p = dst + (j * n + i) * sizeof(float);
+            val =  make_float32(cpu_ldl_data(env, src_p));
+            cpu_stl_data(env, dst_p, float32_val(val));
+        }
+    }
+}
+
 
 /* Exceptions processing helpers */
 G_NORETURN void riscv_raise_exception(CPURISCVState *env,

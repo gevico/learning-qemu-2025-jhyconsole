@@ -18,6 +18,18 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+ /* manual add DMA */
+static bool trans_dma(DisasContext *ctx, arg_dma *a)
+{
+    TCGv dst = get_gpr(ctx, a->rd, EXT_NONE);
+    TCGv src = get_gpr(ctx, a->rs1, EXT_NONE);
+    TCGv grain = get_gpr(ctx, a->rs2, EXT_NONE);
+
+    gen_helper_dma(tcg_env, dst, src, grain);
+    return true;
+}
+
+
 static bool trans_illegal(DisasContext *ctx, arg_empty *a)
 {
     gen_exception_illegal(ctx);
