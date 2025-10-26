@@ -27,7 +27,7 @@
 #include "exec/helper-proto.h"
 #include "exec/tlb-flags.h"
 #include "trace.h"
-/* Learning QEMU */
+/* manual add */
 void helper_dma(CPURISCVState *env, uintptr_t dst,
                 uintptr_t src, target_ulong grain)
 {
@@ -48,6 +48,46 @@ void helper_dma(CPURISCVState *env, uintptr_t dst,
             val =  make_float32(cpu_ldl_data(env, src_p));
             cpu_stl_data(env, dst_p, float32_val(val));
         }
+    }
+}
+void helper_sort(CPURISCVState *env, uintptr_t start,
+                 target_ulong n, target_ulong cnt)
+{
+    int i, j;
+    int x, y;
+    uintptr_t xp, yp;
+
+    if (n < cnt) {
+        riscv_raise_exception(env, RISCV_EXCP_ILLEGAL_INST, GETPC());
+    }
+
+    for (i = cnt - 1; i > 0; --i) {
+        for (j = 0; j < i; ++j) {
+            xp = start + j * sizeof(int);
+            yp = start + (j + 1) * sizeof(int);
+            x = cpu_ldl_data(env, xp);
+            y = cpu_ldl_data(env, yp);
+            if (x > y) {
+                cpu_stl_data(env, xp, y);
+                cpu_stl_data(env, yp, x);
+            }
+        }
+    }
+}
+void helper_crush(CPURISCVState *env, uintptr_t src,
+                  uintptr_t num, uintptr_t dst)
+{
+    /* 将src的数组两个单元，抽出低四位合并为dst的数组一个单元的八位 */
+
+    int i;
+    uint8_t val;
+    uintptr_t src_p, dst_p;
+    for (i = 0; i < num; i += 2) {
+        src_p = src + i * sizeof(uint8_t);
+        dst_p = dst + (i / 2) * sizeof(uint8_t);
+        val = (cpu_ldl_data(env, src_p) & 0x0F) |
+              ((cpu_ldl_data(env, src_p + sizeof(uint8_t)) & 0x0F) << 4);
+        cpu_stl_data(env, dst_p, val);
     }
 }
 

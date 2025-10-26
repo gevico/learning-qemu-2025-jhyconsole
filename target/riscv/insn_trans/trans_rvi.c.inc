@@ -18,7 +18,7 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
- /* manual add DMA */
+ /* manual add */
 static bool trans_dma(DisasContext *ctx, arg_dma *a)
 {
     TCGv dst = get_gpr(ctx, a->rd, EXT_NONE);
@@ -26,6 +26,24 @@ static bool trans_dma(DisasContext *ctx, arg_dma *a)
     TCGv grain = get_gpr(ctx, a->rs2, EXT_NONE);
 
     gen_helper_dma(tcg_env, dst, src, grain);
+    return true;
+}
+static bool trans_sort(DisasContext *ctx, arg_sort *a)
+{
+    TCGv start = get_gpr(ctx, a->rs1, EXT_NONE);
+    TCGv n = get_gpr(ctx, a->rs2, EXT_NONE);
+    TCGv cnt = get_gpr(ctx, a->rd, EXT_NONE);
+
+    gen_helper_sort(tcg_env, start, n, cnt);
+    return true;
+}
+static bool trans_crush(DisasContext *ctx, arg_crush *a)
+{
+    TCGv src = get_gpr(ctx, a->rs1, EXT_NONE);
+    TCGv num = get_gpr(ctx, a->rs2, EXT_NONE);
+    TCGv dst = get_gpr(ctx, a->rd, EXT_NONE);
+
+    gen_helper_crush(tcg_env, src, num, dst);
     return true;
 }
 
