@@ -42,22 +42,28 @@
 #define SPI_CR1_SPE     (1 << 6)   /* SPI Enable */
 #define SPI_CR1_MSTR    (1 << 2)   /* Master mode */
 
+/* SPI Control Register 2 (CR2) bits */
+#define SPI_CR2_TXEIE     (1 << 7)
+#define SPI_CR2_RXNEIE    (1 << 6)
+#define SPI_CR2_ERRIE     (1 << 5)
+#define SPI_CR2_SSOE      (1 << 4)
+
 /* SPI Status Register (SR) bits */
 #define SPI_SR_TXE      (1 << 1)   /* Transmit buffer empty */
 #define SPI_SR_RXNE     (1 << 0)   /* Receive buffer not empty */
 #define SPI_SR_BSY      (1 << 7)   /* Busy flag */
+#define SPI_SR_OVERRUN  (1 << 3)
+#define SPI_SR_UNDERRUN (1 << 2)
 
-/* CS Control Register bits */
-#define SPI_CS_ENABLE   (1 << 0)   /* Enable CS0 */
-#define SPI_CS_ACTIVE   (1 << 4)   /* Activate CS0 */
-
-/* W25Q16 JEDEC ID commands */
-#define W25Q16_CMD_JEDEC_ID 0x9F
-
-#define TXDATA_FULL     (1 << 31)
 #define RXDATA_EMPTY    (1 << 31)
 
-#define FIFO_CAPACITY   8
+#define FIFO_CAPACITY   1
+
+#define CSi_EN(sr, i) \
+    ( ( (sr) >> (i) ) & 1 )
+
+#define CSi_ACT(sr, i) \
+    ( ( (sr) >> ( (i) + 4 ) ) & 1)
 
 static void g233_spi_txfifo_reset(G233SPIState *s)
 {
@@ -67,6 +73,60 @@ static void g233_spi_txfifo_reset(G233SPIState *s)
 static void g233_spi_rxfifo_reset(G233SPIState *s)
 {
     fifo8_reset(&s->rx_fifo);
+}
+
+static void g233_spi_update_cs(G233SPIState *s)
+{
+    int i;
+
+    for (i = 0; i < NUM_CS; i++) {
+        if (!CSi_EN(s->csctrl, i)) {
+            qemu_set_irq(s->cs_lines[i], 1);
+            continue;
+        }
+
+        if (CSi_ACT(s->csctrl, i)) {
+            qemu_set_irq(s->cs_lines[i], 0);
+        } else {
+            qemu_set_irq(s->cs_lines[i], 1);
+        }
+    }
+}
+
+static void g233_spi_update_irq(G233SPIState *s)
+{
+    int level = 0;
+
+    /* Is trigger TX int ? */
+    if ((s->cr2 & SPI_CR2_TXEIE) && (s->sr & SPI_SR_TXE))
+        level = 1;
+
+    /* Is trigger RX int ? */
+    if ((s->cr2 & SPI_CR2_RXNEIE) && (s->sr & SPI_SR_RXNE))
+        level = 1;
+
+    /* Is trigger ERR int ? */
+    if ((s->cr2 & SPI_CR2_ERRIE) && (s->sr & (SPI_SR_OVERRUN | SPI_SR_UNDERRUN)))
+        level = 1;
+
+    qemu_set_irq(s->irq, level);
+}
+
+static void g233_spi_update_state(G233SPIState *s)
+{
+    if (fifo8_is_empty(&s->tx_fifo)) {
+        s->sr |= SPI_SR_TXE;
+    } else {
+        s->sr &= ~SPI_SR_TXE;
+    }
+
+    if (!fifo8_is_empty(&s->rx_fifo)) {
+        s->sr |= SPI_SR_RXNE;
+    } else {
+        s->sr &= ~SPI_SR_RXNE;
+    }
+
+    g233_spi_update_irq(s);
 }
 
 static void g233_spi_reset(DeviceState *d)
@@ -82,6 +142,9 @@ static void g233_spi_reset(DeviceState *d)
 
     g233_spi_txfifo_reset(s);
     g233_spi_rxfifo_reset(s);
+
+    g233_spi_update_state(s);
+    g233_spi_update_cs(s);
 }
 
 static void g233_spi_flush_txfifo(G233SPIState *s)
@@ -89,16 +152,20 @@ static void g233_spi_flush_txfifo(G233SPIState *s)
     uint8_t tx;
     uint8_t rx;
 
+    s->sr |= SPI_SR_BSY;
+
     while (!fifo8_is_empty(&s->tx_fifo)) {
         tx = fifo8_pop(&s->tx_fifo);
         rx = ssi_transfer(s->spi, tx);
 
         if (!fifo8_is_full(&s->rx_fifo)) {
             fifo8_push(&s->rx_fifo, rx);
+        } else {
+            s->sr |= SPI_SR_OVERRUN;
         }
     }
-    s->sr |= SPI_SR_TXE;
-    s->sr |= SPI_SR_RXNE;
+
+    s->sr &= ~SPI_SR_BSY;
 }
 
 static uint64_t g233_spi_read(void *opaque, hwaddr offset,
@@ -106,6 +173,9 @@ static uint64_t g233_spi_read(void *opaque, hwaddr offset,
 {
     G233SPIState *s = opaque;
     uint32_t val = 0;
+
+    /* Update state before reading. */
+    g233_spi_update_state(s);
 
     switch (offset) {
     case G233_SPI_CR1:
@@ -136,8 +206,6 @@ static void g233_spi_write(void *opaque, hwaddr offset,
 {
     G233SPIState *s = opaque;
 
-    /* set busy-bit before writing. */
-    s->sr |= SPI_SR_BSY;
     switch (offset) {
     case G233_SPI_CR1:
         s->cr1 = (uint32_t)value;
@@ -146,20 +214,27 @@ static void g233_spi_write(void *opaque, hwaddr offset,
         s->cr2 = (uint32_t)value;
         break;
     case G233_SPI_SR:
-        s->sr = (uint32_t)value;
+        if (value & SPI_SR_OVERRUN)
+            s->sr &= ~SPI_SR_OVERRUN;
+        if (value & SPI_SR_UNDERRUN)
+            s->sr &= ~SPI_SR_UNDERRUN;
         break;
     case G233_SPI_DR:
         if (!fifo8_is_full(&s->tx_fifo)) {
             fifo8_push(&s->tx_fifo, (uint8_t)value);
             g233_spi_flush_txfifo(s);
+        } else {
+            s->sr |= SPI_SR_OVERRUN;
         }
         break;
     case G233_SPI_CSCTRL:
         s->csctrl = (uint32_t)value;
+        g233_spi_update_cs(s);
         break;
     }
-    /* clear busy-bit after writing. */
-    s->sr &= ~SPI_SR_BSY;
+
+    /* Update state after writing. */
+    g233_spi_update_state(s);
 }
 
 static const MemoryRegionOps g233_spi_ops = {
